@@ -5,14 +5,81 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>손가락 운동 챌린지 (Finger Gym)</title>
 
-<!-- Firebase SDK (v9 모듈버전) -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-  import { getFirestore, collection, addDoc, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-analytics.js";
+<!-- Firebase V8 CDN -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-analytics.js"></script>
 
-  // Firebase 설정값
-  const firebaseConfig = {
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    max-width: 480px;
+    margin: auto;
+    padding: 1em;
+    text-align: center;
+  }
+  #gameArea {
+    margin: 20px 0;
+    position: relative;
+    width: 320px;
+    height: 480px;
+    border: 1px solid #333;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .dot {
+    position: absolute;
+    border-radius: 50%;
+    background-color: red;
+    cursor: pointer;
+  }
+  #ranking {
+    text-align: left;
+    max-height: 300px;
+    overflow-y: auto;
+    border-top: 1px solid #ccc;
+    margin-top: 15px;
+    padding-top: 10px;
+  }
+  #ranking div {
+    border-bottom: 1px solid #ddd;
+    padding: 4px 0;
+  }
+  #saveBtn {
+    margin-top: 10px;
+    padding: 10px 20px;
+    font-size: 1em;
+    cursor: pointer;
+  }
+  #nickname {
+    font-size: 1em;
+    padding: 5px;
+    width: 140px;
+  }
+  #scoreDisplay {
+    font-size: 1.2em;
+    margin: 10px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>손가락 운동 챌린지 (Finger Gym)</h1>
+
+<input type="text" id="nickname" placeholder="닉네임 입력 (최대10자)" maxlength="10" />
+<div id="scoreDisplay">점수: 0</div>
+
+<div id="gameArea"></div>
+
+<button id="startBtn">게임 시작</button>
+<button id="saveBtn" disabled>랭킹 저장하기</button>
+
+<h2>랭킹 (상위 100명)</h2>
+<div id="ranking"></div>
+
+<script>
+  // Firebase 초기화 (V8 방식)
+  var firebaseConfig = {
     apiKey: "AIzaSyCkSm4Zq2LUIGQr-v5Ix1ony4GBZLGvwqA",
     authDomain: "finger-gym-de648.firebaseapp.com",
     projectId: "finger-gym-de648",
@@ -21,117 +88,153 @@
     appId: "1:1093207272173:web:5a67893d026bbe2d0d7ae4",
     measurementId: "G-SSX4VGK20P"
   };
+  firebase.initializeApp(firebaseConfig);
+  firebase.analytics();
+  var db = firebase.firestore();
 
-  // Firebase 초기화
-  const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
-  const db = getFirestore(app);
+  // 게임 변수
+  let score = 0;
+  let gameDuration = 15000; // 15초
+  let dotCount = 5;
+  let dotSize = 40;
+  let dots = [];
+  let gameTimer = null;
 
-  // 랭킹 컬렉션 참조
-  const rankingCol = collection(db, "rankings");
+  const gameArea = document.getElementById('gameArea');
+  const scoreDisplay = document.getElementById('scoreDisplay');
+  const nicknameInput = document.getElementById('nickname');
+  const saveBtn = document.getElementById('saveBtn');
+  const startBtn = document.getElementById('startBtn');
+  const rankingDiv = document.getElementById('ranking');
 
-  // 랭킹 저장 함수
-  async function saveRanking(nickname, score) {
-    try {
-      await addDoc(rankingCol, {
-        nickname: nickname,
-        score: score,
-        timestamp: new Date()
-      });
-      console.log("랭킹 저장 성공!");
-    } catch (e) {
-      console.error("랭킹 저장 실패:", e);
-    }
+  // 점 위치 무작위 생성 (게임 영역 내)
+  function createDot() {
+    let dot = document.createElement('div');
+    dot.classList.add('dot');
+    dot.style.width = dotSize + 'px';
+    dot.style.height = dotSize + 'px';
+
+    // 랜덤 위치 (게임 영역 안)
+    const maxX = gameArea.clientWidth - dotSize;
+    const maxY = gameArea.clientHeight - dotSize;
+    const x = Math.random() * maxX;
+    const y = Math.random() * maxY;
+    dot.style.left = x + 'px';
+    dot.style.top = y + 'px';
+
+    // 클릭 이벤트
+    dot.onclick = () => {
+      score++;
+      scoreDisplay.textContent = "점수: " + score;
+      moveDot(dot);
+    };
+
+    gameArea.appendChild(dot);
+    return dot;
   }
 
-  // 랭킹 불러오기 함수 (상위 100명)
-  async function loadRanking() {
-    const q = query(rankingCol, orderBy("score", "desc"), limit(100));
-    const querySnapshot = await getDocs(q);
-    const rankingList = [];
-    querySnapshot.forEach((doc) => {
-      rankingList.push(doc.data());
-    });
-    return rankingList;
+  // 점 위치 이동 (게임중 터치 시 위치 변경)
+  function moveDot(dot) {
+    const maxX = gameArea.clientWidth - dotSize;
+    const maxY = gameArea.clientHeight - dotSize;
+    const x = Math.random() * maxX;
+    const y = Math.random() * maxY;
+    dot.style.left = x + 'px';
+    dot.style.top = y + 'px';
   }
 
-  // DOMContentLoaded 후 실행
-  document.addEventListener("DOMContentLoaded", () => {
-    // 게임 변수, UI 등 초기화 코드 여기에 작성
+  // 게임 시작
+  function startGame() {
+    score = 0;
+    scoreDisplay.textContent = "점수: 0";
+    saveBtn.disabled = true;
 
-    const nicknameInput = document.getElementById("nickname");
-    const scoreDisplay = document.getElementById("score");
-    const saveBtn = document.getElementById("saveBtn");
-    const rankingContainer = document.getElementById("ranking");
+    // 기존 점 제거
+    dots.forEach(d => gameArea.removeChild(d));
+    dots = [];
 
-    // 저장 버튼 클릭 시 랭킹 저장
-    saveBtn.addEventListener("click", async () => {
-      const nickname = nicknameInput.value.trim();
-      const score = parseInt(scoreDisplay.textContent, 10);
-
-      if (!nickname) {
-        alert("닉네임을 입력해주세요.");
-        return;
-      }
-      if (isNaN(score) || score <= 0) {
-        alert("유효한 점수가 아닙니다.");
-        return;
-      }
-
-      await saveRanking(nickname, score);
-      alert("랭킹이 저장되었습니다!");
-
-      // 저장 후 랭킹 새로 불러오기
-      const rankingList = await loadRanking();
-      displayRanking(rankingList);
-    });
-
-    // 랭킹 화면 표시 함수
-    function displayRanking(list) {
-      rankingContainer.innerHTML = "";
-      list.forEach((item, index) => {
-        const div = document.createElement("div");
-        div.textContent = `${index + 1}위: ${item.nickname} - 점수: ${item.score}`;
-        rankingContainer.appendChild(div);
-      });
+    // 점 여러 개 생성 (dotCount 개)
+    for (let i = 0; i < dotCount; i++) {
+      let dot = createDot();
+      dots.push(dot);
     }
 
-    // 처음 페이지 로드 시 랭킹 불러오기
-    loadRanking().then(displayRanking);
-  });
+    startBtn.disabled = true;
+
+    // 게임 종료 타이머 (15초 후)
+    gameTimer = setTimeout(() => {
+      endGame();
+    }, gameDuration);
+  }
+
+  // 게임 종료
+  function endGame() {
+    dots.forEach(d => gameArea.removeChild(d));
+    dots = [];
+    alert("게임 종료! 점수: " + score);
+    saveBtn.disabled = false;
+    startBtn.disabled = false;
+  }
+
+  // 랭킹 저장
+  function saveRanking(nickname, score) {
+    return db.collection("rankings").add({
+      nickname: nickname,
+      score: score,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    }).then(() => {
+      alert("랭킹 저장 완료!");
+      loadRanking();
+    }).catch((error) => {
+      alert("랭킹 저장 실패: " + error.message);
+    });
+  }
+
+  // 랭킹 불러오기
+  function loadRanking() {
+    db.collection("rankings")
+      .orderBy("score", "desc")
+      .limit(100)
+      .get()
+      .then((querySnapshot) => {
+        rankingDiv.innerHTML = "";
+        let rank = 1;
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          let div = document.createElement('div');
+          let badge = '';
+          if(rank === 1) badge = ' 🏆';
+          div.textContent = rank + "위: " + data.nickname + " - 점수: " + data.score + badge;
+          rankingDiv.appendChild(div);
+          rank++;
+        });
+      });
+  }
+
+  // 버튼 이벤트
+  startBtn.onclick = () => {
+    startGame();
+  };
+
+  saveBtn.onclick = () => {
+    const nickname = nicknameInput.value.trim();
+    if (!nickname) {
+      alert("닉네임을 입력하세요.");
+      return;
+    }
+    if(score <= 0) {
+      alert("점수가 0 이하입니다.");
+      return;
+    }
+    saveRanking(nickname, score);
+    saveBtn.disabled = true;
+  };
+
+  // 페이지 로드시 랭킹 불러오기
+  window.onload = () => {
+    loadRanking();
+  };
 </script>
-
-<style>
-  /* 간단한 기본 스타일 */
-  body {
-    font-family: Arial, sans-serif;
-    padding: 1em;
-    max-width: 480px;
-    margin: auto;
-  }
-  #ranking div {
-    padding: 4px 0;
-    border-bottom: 1px solid #ddd;
-  }
-</style>
-</head>
-
-<body>
-<h1>손가락 운동 챌린지 (Finger Gym)</h1>
-
-<label for="nickname">닉네임:</label>
-<input id="nickname" type="text" maxlength="10" placeholder="닉네임 입력" />
-
-<div>
-  <h2>점수: <span id="score">0</span></h2>
-</div>
-
-<button id="saveBtn">랭킹 저장하기</button>
-
-<h2>랭킹 (상위 100명)</h2>
-<div id="ranking"></div>
-
-<!-- 실제 게임 화면, 점 터치 게임 UI는 이 아래에 추가하면 됩니다 -->
 
 </body>
 </html>
